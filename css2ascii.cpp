@@ -5,6 +5,9 @@
 #include <vector>
 #include <set>
 #include <algorithm>
+#include <cstdlib>
+#include <cerrno>
+#include <libgen.h>
 #include "css.h"
 #include "anyoption.h"
 #include "util.h"
@@ -18,6 +21,7 @@ bool wf_pointer_cmp( NCPA::CSS::Wfdisc *a, NCPA::CSS::Wfdisc *b) {
 }
 bool string_cmp( string a, string b ) { return a.compare( b ) < 0; }
 
+bool verbose = false;
 
 void close_waveform(vector<double> &fullwave, NCPA::CSS::Wfdisc *wf, double thistime) {
 
@@ -37,6 +41,10 @@ void close_waveform(vector<double> &fullwave, NCPA::CSS::Wfdisc *wf, double this
 	filename += ".";
 	filename += timestr;
 	filename += ".dat";
+	
+	if (verbose) {
+		cout << "Writing to " << filename << endl;
+	}
 
 	double calib = wf->getField("calib")->asFloat();
 
@@ -79,7 +87,7 @@ int main( int argc, char **argv ) {
 		return 1;
 	}
 
-	bool verbose = false;
+	
 	string channel_list = "";
 	double maxduration = 86400.0;
 	if (opt->getFlag("help") || opt->getFlag('h') ) {
@@ -116,10 +124,29 @@ int main( int argc, char **argv ) {
 	}
 
 	string wfname = basename + ".wfdisc";
+	char full_wfname[ 256 ];
+	if (realpath( wfname.c_str(), full_wfname ) == NULL) {
+		cerr << "Can't detect full path to " << wfname << ": "
+			<< strerror( errno ) << endl;
+		return 1;
+	}
+	
+	char wfname_copy[ 256 ], *wfpath_ptr;
+	if (strcpy( wfname_copy, full_wfname ) == NULL) {
+		cerr << "Can't copy pathname: " << strerror( errno ) << endl;
+		return 1;
+	}
+	wfpath_ptr = dirname( wfname_copy );
+	string wfpath = wfpath_ptr;
+	if (verbose) {
+		cout << "Full .wfdisc file is " << full_wfname << endl
+			<< "Base path is " << wfpath << endl;
+		
+	}
 
 	vector< NCPA::CSS::Wfdisc * > wfdiscs;
 	vector< NCPA::CSS::Wfdisc * >::iterator wf_iterator;
-	ifstream wfstream( wfname.c_str() );
+	ifstream wfstream( full_wfname );
 	string wfline;
 	std::getline( wfstream, wfline );
 	while (wfline.length() == 283) {
@@ -129,7 +156,6 @@ int main( int argc, char **argv ) {
 		if (channels.empty() || it != channels.end())
 			wfdiscs.push_back( wfdisc );
 		std::getline( wfstream, wfline );
-
 	}
 
 	sort( wfdiscs.begin(), wfdiscs.end(), wf_pointer_cmp );
@@ -194,12 +220,17 @@ int main( int argc, char **argv ) {
 			}
 
 			// read in the waveform data
-			string wfilename = wfdiscs[ index ]->getField("dir")->asString();
+			string wfilename = wfpath + "/" + wfdiscs[ index ]->getField("dir")->asString();
 			if (wfilename[ wfilename.length()-1 ] != '/') {
 				wfilename += "/";
 			}
 			wfilename += wfdiscs[ index ]->getField("dfile")->asString();
+			cout << "Reading " << wfilename << endl;
 			ifstream wstream( wfilename.c_str(), ios_base::in | ios_base::binary );
+			if (wstream.fail()) {
+				cerr << "Error opening file " << wfilename << endl;
+				return 1;
+			}
 			wstream.seekg( wfdiscs[ index ]->getField("foff")->asInt() );
 			int nsamp = wfdiscs[ index ]->getField("nsamp")->asInt();
 			double *temparray = new double[ nsamp ];
